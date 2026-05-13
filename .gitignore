@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Generated Isaac / Omniverse files
+*.usd
+*.usda
+*.usdc
+*.usdz
+*.dmp
+.thumbs/
+
+# Keep asset folders even though generated/binary assets are ignored.
+!assets/
+!assets/**/
+!assets/**/.gitkeep
