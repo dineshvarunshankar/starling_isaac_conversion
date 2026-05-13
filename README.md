@@ -1,17 +1,14 @@
 # Starling 2 CAD to Isaac Sim Robot Description Workflow
 
-This document explains how to convert the Starling 2 CAD model into robot description files for Isaac Sim / Isaac Lab simulation.
+*(Note: The final simulation-ready `starling_2.usd` asset and original source STEP CAD files can be downloaded directly from [Google Drive](https://drive.google.com/drive/folders/1k4Sfebg8j9LJh4NXsCWhVzftJGb4_1UY?usp=sharing)).*
 
-In this workflow, the robot description is not just one mesh file. It is a small set of files:
+This document explains how to prepare the ModalAI Starling 2 CAD model and convert it into a fully functional robot simulation asset for Isaac Sim and Isaac Lab.
 
-```text
-Fusion 360 CAD model
-  -> per-link USDZ geometry files
-  -> one robot USD file with physics and joints
-  -> one Isaac Lab Python config for spawning and actuating the robot
-```
+The conversion workflow is broken down into three straightforward steps:
 
-The final target is Isaac Lab. Isaac Lab loads the robot from USD, then uses Python configuration to define the multirotor actuators, rotor order, rotor directions, and allocation matrix.
+1. **CAD Export:** Export the visual and collision meshes from Fusion 360 as standard `.usdz` files.
+2. **USD Generation:** Run the provided Python script to compile the individual meshes into a single self-contained `starling_2.usd` asset with all mass properties and fixed joints applied.
+3. **Isaac Lab Setup:** Reference the generated USD file inside an Isaac Lab Python configuration class to define the multirotor actuators and control allocation matrix.
 
 ## 1. What We Are Building
 
@@ -41,40 +38,25 @@ Each prop link is treated as one rigid motor/propeller/screw/nut group. The prop
 Use a layout like this:
 
 ```text
-${PROJECT_ROOT}/assets/starling_2/
-  starling_2.usd
+assets/starling_2/
+  starling_2.usd           # Fully self-contained monolithic OpenUSD robot asset
   meshes/
-    base_link.usdz
+    base_link.usdz         # Source geometry exports from Fusion 360
     front_left_prop.usdz
     front_right_prop.usdz
     back_left_prop.usdz
     back_right_prop.usdz
-  source_stl/
-    optional original STL exports used for bounds/debugging
 ```
 
-The files have different roles:
+The files in this repository have the following roles:
 
-```text
-meshes/*.usdz
-  Geometry exported from Fusion.
-  These files contain visual meshes and materials.
+| File | Role |
+| :--- | :--- |
+| **`README.md`** | Instructions for CAD preparation, coordinate conversion, and Isaac Lab setup. |
+| **`scripts/make_starling_usd_from_usdz.py`** | Builds and flattens `starling_2.usd` into a self-contained single file asset with embedded physics and joints. |
+| **`scripts/set_starling_mass.py`** | Updates mass, center of mass, and inertia parameters on an existing USD stage. |
+| **`scripts/view_starling_usd.py`** | Loads `starling_2.usd` in Isaac Sim for visual inspection. |
 
-starling_2.usd
-  The actual Isaac Sim robot description.
-  It references the USDZ files and adds rigid bodies, collisions, mass, inertia, joints, and articulation metadata.
-
-starling_2.py
-  Isaac Lab robot config.
-  It points to starling_2.usd and defines multirotor actuator behavior.
-```
-
-Example environment variables used in the commands below:
-
-```bash
-export PROJECT_ROOT=/path/to/starling_isaac_conversion
-export ISAACLAB_ROOT=~/IsaacLab
-```
 
 ## 3. Load the CAD Model in Fusion 360
 
@@ -142,14 +124,14 @@ Before building the robot USD, verify that each USDZ file actually contains mesh
 Use Isaac Lab's Python environment:
 
 ```bash
-${ISAACLAB_ROOT}/isaaclab.sh -p -c "
+~/IsaacLab/isaaclab.sh -p -c "
 from isaaclab.app import AppLauncher
 app_launcher = AppLauncher(headless=True)
 simulation_app = app_launcher.app
 
 from pxr import Usd, UsdGeom
 
-path = '${PROJECT_ROOT}/assets/starling_2/meshes/front_left_prop.usdz'
+path = 'assets/starling_2/meshes/front_left_prop.usdz'
 stage = Usd.Stage.Open(path)
 
 print('opened:', bool(stage))
@@ -180,27 +162,30 @@ points_total: greater than 0
 
 If `points_total` is zero, the file is not useful as geometry. This was the problem with directly referencing STL files from USD: the USD stage could reference the file path, but there were no USD mesh points available for Isaac to render and simulate properly.
 
-## 6. Convert Starling 2 Coordinates to Isaac Coordinates
+## 6. Convert CAD Coordinates to Simulation Coordinates
 
-Different CAD exports may use different source frames. For this Starling 2 export, the effective source frame was:
+> [!NOTE]
+> **Pre-coded in scripts:** The conversions below are already hardcoded into `scripts/make_starling_usd_from_usdz.py`. You do not need to apply these transformations manually.
+
+The original CAD exports define axes differently than the simulation target. The effective source frame of the raw CAD exports is:
 
 ```text
-source X = left/right
+source X = left/right (negative values = left side)
 source Y = up
 source Z = front/back
 source units = millimeters
 ```
 
-The Isaac target frame is:
+The standard simulation target frame (Forward-Left-Up) requires:
 
 ```text
 target X = forward/back
-target Y = left/right
+target Y = left/right (positive values = left side)
 target Z = up
 target units = meters
 ```
 
-The conversion used for the geometry is:
+To map the CAD geometry into the simulation frame, the script applies the following conversion:
 
 ```text
 target_x =  source_z * 0.001
@@ -208,19 +193,9 @@ target_y = -source_x * 0.001
 target_z =  source_y * 0.001
 ```
 
-Equivalent short form:
+*(Note: `target_y` uses a negative sign because the source CAD files define the left side using negative values, whereas the simulation target frame requires positive values for the left axis).*
 
-```text
-target = (source_Z, -source_X, source_Y) * 0.001
-```
-
-The `0.001` factor converts millimeters to meters:
-
-```text
-1 mm = 0.001 m
-```
-
-In the USD creation script, this is applied as a transform on the referenced geometry:
+In the generator script, this mapping is authored as a 4x4 matrix transform on the referenced geometry:
 
 ```python
 m = Gf.Matrix4d(
@@ -231,48 +206,14 @@ m = Gf.Matrix4d(
 )
 ```
 
-This step is critical. Without it, the robot can appear sideways, collapsed, shifted, or mirrored in Isaac Sim.
+## 7. Pre-Calculated Rotor Centers
 
-## 7. Calculate Rotor Centers
+> [!NOTE]
+> **Pre-coded in scripts:** The final rotor centers are already measured and hardcoded into the `CENTERS` dictionary in the generation script. They determine joint placements and the control allocation matrix.
 
-The rotor centers are needed for joints, visual checks, and the multirotor allocation matrix.
+To determine where the propeller links connect to the base frame, spatial extents were measured directly from the raw CAD source geometry. 
 
-For each propeller USDZ, compute the bounding box center in Fusion/source coordinates:
-
-```text
-center_source = (min + max) / 2
-```
-
-Example for one prop:
-
-```text
-min = (-100.145, 1.900, 29.863) mm
-max = (-33.874, 20.771, 78.927) mm
-```
-
-Calculate each coordinate:
-
-```text
-center_source_x = (-100.145 + -33.874) / 2 = -67.010 mm
-center_source_y = (1.900 + 20.771) / 2 = 11.336 mm
-center_source_z = (29.863 + 78.927) / 2 = 54.395 mm
-```
-
-So:
-
-```text
-center_source = (-67.010, 11.336, 54.395) mm
-```
-
-Apply the Fusion-to-Isaac conversion:
-
-```text
-center_target = (source_Z, -source_X, source_Y) * 0.001
-center_target = (54.395, 67.010, 11.336) * 0.001
-center_target = (0.054395, 0.067010, 0.011336) m
-```
-
-Final rotor centers used:
+Applying the conversion formula to the measured CAD origins yields the final simulation centers in meters:
 
 ```python
 CENTERS = {
@@ -283,7 +224,7 @@ CENTERS = {
 }
 ```
 
-The signs are useful sanity checks:
+The resulting signs verify correct physical placement in the simulation target frame:
 
 ```text
 front props: x > 0
@@ -294,22 +235,38 @@ right props: y < 0
 
 ## 8. Build the Robot USD
 
-The robot USD is generated with:
+Before compiling the robot USD stage, ensure you have completed the following prerequisites:
 
-```text
-${PROJECT_ROOT}/scripts/make_starling_usd_from_usdz.py
-```
+1. **Activate Environment:** Activate your Isaac Lab/sim conda environment:
+   ```bash
+   conda activate env_isaaclab
+   ```
+2. **Verify Mesh Placement:** Ensure the five exported `.usdz` component files are positioned inside the target asset directory:
+   ```text
+   assets/starling_2/meshes/
+     base_link.usdz
+     front_left_prop.usdz
+     front_right_prop.usdz
+     back_left_prop.usdz
+     back_right_prop.usdz
+   ```
 
-Run it with Isaac Lab Python:
+Once the files are in place, navigate to the repository root directory and compile the master stage file by running the generator script:
 
 ```bash
-${ISAACLAB_ROOT}/isaaclab.sh -p ${PROJECT_ROOT}/scripts/make_starling_usd_from_usdz.py
+~/IsaacLab/isaaclab.sh -p scripts/make_starling_usd_from_usdz.py
 ```
 
-The script writes:
+The script dynamically resolves local file paths and exports the flattened standalone asset directly into:
 
 ```text
-${PROJECT_ROOT}/assets/starling_2/starling_2.usd
+assets/starling_2/starling_2.usd
+```
+
+To visually inspect the final compiled asset inside the Isaac Sim stage viewer GUI, run:
+
+```bash
+~/IsaacLab/isaaclab.sh -p scripts/view_starling_usd.py
 ```
 
 The script should create this prim structure:
@@ -342,7 +299,7 @@ The geometry under each `visuals` prim references the corresponding USDZ file. T
 
 ## 9. Add Physics Meaning to the USD
 
-A mesh by itself is only shape. Isaac Sim also needs physics schemas.
+A mesh by itself is only shape. Isaac Sim also needs physics schemas to simulate rigid body dynamics. `scripts/make_starling_usd_from_usdz.py` applies these properties directly to the prims in the USD file.
 
 Apply these APIs to `base_link`:
 
@@ -375,6 +332,8 @@ PhysicsFixedJoint
 The prop links are fixed to `base_link` because the Starling is simulated as a multirotor with thrust applied at the prop bodies. We are not simulating motor shaft rotation or blade spinning as articulated motion.
 
 ## 10. Assign Mass and Inertia
+
+*(Note: The mass and inertia values derived below are hardcoded directly inside `scripts/make_starling_usd_from_usdz.py` and are assigned automatically during stage generation).*
 
 The ModalAI Starling 2 datasheet lists:
 
@@ -412,6 +371,8 @@ Check:
 
 ### Inertia Calculation
 
+*(Formula represents the standard mass moment of inertia for a uniform solid box rotating around its center of mass).*
+
 For a first-pass simulator inertia, approximate each link as a box:
 
 ```text
@@ -420,7 +381,7 @@ Iyy = (1/12) * m * (x^2 + z^2)
 Izz = (1/12) * m * (x^2 + y^2)
 ```
 
-Approximate base dimensions:
+Approximate base dimensions *(measured directly from the outer bounding box extents of the `base_link` CAD geometry)*:
 
 ```text
 x = 0.151 m
@@ -453,14 +414,14 @@ These are approximate but stable first-pass values. Replace them later with meas
 After generating the robot USD, verify that the geometry is the right size and in the right quadrants.
 
 ```bash
-${ISAACLAB_ROOT}/isaaclab.sh -p -c "
+~/IsaacLab/isaaclab.sh -p -c "
 from isaaclab.app import AppLauncher
 app_launcher = AppLauncher(headless=True)
 simulation_app = app_launcher.app
 
 from pxr import Usd, UsdGeom
 
-stage = Usd.Stage.Open('${PROJECT_ROOT}/assets/starling_2/starling_2.usd')
+stage = Usd.Stage.Open('assets/starling_2/starling_2.usd')
 cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ['default', 'render', 'proxy'])
 
 for p in [
@@ -493,14 +454,14 @@ prop z: about 0.011 m
 Check that each prop is connected to `base_link`:
 
 ```bash
-${ISAACLAB_ROOT}/isaaclab.sh -p -c "
+~/IsaacLab/isaaclab.sh -p -c "
 from isaaclab.app import AppLauncher
 app_launcher = AppLauncher(headless=True)
 simulation_app = app_launcher.app
 
 from pxr import Usd, UsdPhysics
 
-stage = Usd.Stage.Open('${PROJECT_ROOT}/assets/starling_2/starling_2.usd')
+stage = Usd.Stage.Open('assets/starling_2/starling_2.usd')
 
 for name in ['front_left_prop','front_right_prop','back_left_prop','back_right_prop']:
     path = f'/starling_2/joints/base_link_to_{name}'
@@ -530,19 +491,19 @@ collisionEnabled: False
 The lab already had a working multirotor robot config:
 
 ```text
-${ISAACLAB_ROOT}/source/isaaclab_assets/isaaclab_assets/robots/arl_robot_1.py
+~/IsaacLab/source/isaaclab_assets/isaaclab_assets/robots/arl_robot_1.py
 ```
 
 Use it as the template for:
 
 ```text
-${ISAACLAB_ROOT}/source/isaaclab_assets/isaaclab_assets/robots/starling_2.py
+~/IsaacLab/source/isaaclab_assets/isaaclab_assets/robots/starling_2.py
 ```
 
 The Starling config must point to the new USD:
 
 ```python
-usd_path="${PROJECT_ROOT}/assets/starling_2/starling_2.usd"
+usd_path="assets/starling_2/starling_2.usd"
 ```
 
 Define the thrusters:
@@ -622,8 +583,8 @@ allocation_matrix=[
     [0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0],
     [1.0, 1.0, 1.0, 1.0],
-    [-0.053543396, -0.052976705, 0.053611006, 0.053543396],
-    [-0.067218193, 0.065842438, -0.067263916, 0.067218193],
+    [0.067008565, -0.067009726, 0.067009726, -0.065594356],
+    [0.054392057, 0.054395216, -0.054395216, -0.053360999],
     [-0.07, 0.07, -0.07, 0.07],
 ]
 ```
@@ -640,14 +601,14 @@ torque_to_thrust_ratio = 0.07
 Copy the existing ARL task config:
 
 ```bash
-cp -r ${ISAACLAB_ROOT}/source/isaaclab_tasks/isaaclab_tasks/manager_based/drone_arl/track_position_state_based/config/arl_robot_1 \
-      ${ISAACLAB_ROOT}/source/isaaclab_tasks/isaaclab_tasks/manager_based/drone_arl/track_position_state_based/config/starling_2
+cp -r ~/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based/drone_arl/track_position_state_based/config/arl_robot_1 \
+      ~/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based/drone_arl/track_position_state_based/config/starling_2
 ```
 
 Edit:
 
 ```text
-${ISAACLAB_ROOT}/source/isaaclab_tasks/isaaclab_tasks/manager_based/drone_arl/track_position_state_based/config/starling_2/no_obstacle_env_cfg.py
+~/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/manager_based/drone_arl/track_position_state_based/config/starling_2/no_obstacle_env_cfg.py
 ```
 
 Change the robot import:
@@ -680,7 +641,7 @@ id="Isaac-TrackPositionNoObstacles-Starling-2-Play-v0"
 Check that the robot config imports:
 
 ```bash
-${ISAACLAB_ROOT}/isaaclab.sh -p -c "
+~/IsaacLab/isaaclab.sh -p -c "
 from isaaclab.app import AppLauncher
 app_launcher = AppLauncher(headless=True)
 simulation_app = app_launcher.app
@@ -706,7 +667,7 @@ rotor_directions: [1, -1, 1, -1]
 Check that the task registers:
 
 ```bash
-${ISAACLAB_ROOT}/isaaclab.sh -p -c "
+~/IsaacLab/isaaclab.sh -p -c "
 from isaaclab.app import AppLauncher
 app_launcher = AppLauncher(headless=True)
 simulation_app = app_launcher.app
@@ -734,7 +695,7 @@ registered: True
 Open:
 
 ```text
-${PROJECT_ROOT}/assets/starling_2/starling_2.usd
+assets/starling_2/starling_2.usd
 ```
 
 Inspect:
@@ -754,63 +715,21 @@ If the robot appears in the Stage tree but not in the viewport:
 
 If the robot appears with random colors, Fusion materials are still active. For debugging, bind stronger debug materials directly to the mesh prims or hide collision meshes.
 
-## 18. Python Files to Keep
+## 18. Python Files Overview
 
-From the Python files created during this workflow, keep only the files that are part of the final Isaac USD pipeline or useful for inspection.
+As noted in Section 2, the main scripts for this workflow are:
 
-Keep:
+* **`make_starling_usd_from_usdz.py`**: Generates the USD file, applies coordinate transforms, sets initial mass values, and defines fixed joints.
+* **`set_starling_mass.py`**: Optional script to update physical properties on an existing stage.
+* **`view_starling_usd.py`**: Script to open and inspect the generated USD file in Isaac Sim.
 
-```text
-make_starling_usd_from_usdz.py
-```
-
-This is the main generator. It reads the five Fusion-exported USDZ files, creates `starling_2.usd`, references the geometry under the correct link prims, applies the Starling 2 coordinate conversion, creates collision prims, adds rigid-body physics, and creates the fixed joints.
+Final required output files for Isaac Lab integration:
 
 ```text
-set_starling_mass.py
-```
-
-Keep this if mass and inertia assignment is separate from the main USD generation script. It is useful because mass, center of mass, and inertia are values we may tune later without rebuilding the whole geometry pipeline.
-
-```text
-view_starling_usd.py
-```
-
-Optional, but useful. This opens or frames the generated USD in Isaac Sim for visual inspection. Keep it if you want a quick way to check whether the robot is visible, correctly scaled, and oriented correctly.
-
-```text
-check_stl_bounds.py
-```
-
-Optional diagnostic file. This was useful for understanding the original CAD/STL coordinate frame and scale. It is not required for the final USDZ-based workflow, but it is worth keeping if you want a record of how the Starling 2 source-frame conversion was derived.
-
-Ignore or delete:
-
-```text
-convert_starling_stl_to_usd.py
-```
-
-This belongs to the older STL-based path. The final workflow uses Fusion-exported USDZ files, so this is no longer needed.
-
-```text
-make_starling_usd_from_usdz_old.py
-```
-
-This is an older version of the current USDZ generator. Once `make_starling_usd_from_usdz.py` works, the old copy is not needed.
-
-```text
-make_starling_usd.py
-```
-
-This was part of an earlier approach before the USDZ-based pipeline was finalized. If it does not contain anything newer than `make_starling_usd_from_usdz.py`, ignore or delete it.
-
-Final files that must remain for Isaac Lab:
-
-```text
-${PROJECT_ROOT}/assets/starling_2/starling_2.usd
-${PROJECT_ROOT}/assets/starling_2/meshes/*.usdz
-${PROJECT_ROOT}/scripts/make_starling_usd_from_usdz.py
-${PROJECT_ROOT}/scripts/set_starling_mass.py
+assets/starling_2/starling_2.usd
+assets/starling_2/meshes/*.usdz
+scripts/make_starling_usd_from_usdz.py
+scripts/set_starling_mass.py
 ```
 
 ## 19. Final Checklist
@@ -829,42 +748,20 @@ Before using the asset for training or simulation, verify:
 - `STARLING_2_CFG` imports.
 - Starling task ID registers.
 
-## 20. Why Fusion Combine Was Not the Main Path
+## 20. Technical Note: CAD Boolean Operations
 
-Fusion Combine sounds attractive because it seems like each prop group could be merged into one body before export. In practice, it caused more problems than it solved.
+Merging sub-assemblies into single solid bodies using CAD boolean tools (such as Fusion 360's Combine feature) is simple and highly effective for models like the Starling 2 if you do not need to preserve individual hardware components (such as internal screws, nuts, and circuit boards).
 
-The CAD model contains many nested parts. Some prop groups had large numbers of bodies, tiny overlapping faces, linked/external components, and occurrence transforms from the Fusion assembly tree.
+However, if your simulation requires retaining distinct internal components, combining can trigger geometry kernel errors:
 
-The main failure modes were:
+- Overlapping or coincident faces between small hardware items cause boolean failures.
+- Linked external components lose their assembly reference paths.
+- Flattening nested sub-assemblies can break local origin transformations during export.
 
-- Fusion's boolean kernel struggled with very large combine operations.
-- Coincident or nearly coincident faces caused combine errors.
-- Linked components caused instance and external-reference issues.
-- Moving bodies out of nested occurrences could reinterpret their transforms.
-- Parts could shift, stack, collapse, or appear in the wrong coordinate space.
+Exporting uncombined `.usdz` component groups preserves the individual raw bodies without triggering boolean errors.
 
-The solution was to avoid boolean merging. We used Fusion only to make link-level groups and export them as USDZ. The robot structure was then authored in USD, where Isaac Sim actually needs it.
+## 21. Technical Note: URDF Exporter Compatibility
 
-## 21. Why We Did Not Use Fusion2URDF
+Standard CAD-to-URDF plugins require a flat assembly tree where each physical link is a single solid component with predefined joint origins. 
 
-`fusion2urdf` was not used because it expects the Fusion assembly to already be organized like a clean robot model:
-
-- one component per link,
-- no nested component trees inside each link,
-- a valid `base_link`,
-- supported joints,
-- correct parent/child joint structure,
-- geometry that can be exported without transform or instance problems.
-
-The Starling CAD model did not satisfy those assumptions. A prop group still expanded into motor parts, propeller blades, screws, nuts, and nested child components. Making it compatible would have required flattening or combining the model inside Fusion, which is exactly where the instance errors, external reference problems, and coordinate collapse happened.
-
-Also, the final target is Isaac Sim / Isaac Lab, which uses USD directly. The cleanest path was therefore:
-
-```text
-Fusion grouped CAD
-  -> USDZ geometry files
-  -> Isaac robot USD
-  -> Isaac Lab MultirotorCfg
-```
-
-That path keeps Fusion responsible for geometry export and keeps Isaac responsible for simulation structure.
+Because the Starling assembly uses nested sub-components for motors and hardware, converting it to URDF requires destructive CAD flattening that triggers the coordinate shifting issues noted in Section 20. Natively exporting USDZ meshes and defining the rigid body hierarchy directly in OpenUSD avoids CAD restructuring.

@@ -98,7 +98,7 @@ stage.SetDefaultPrim(root.GetPrim())
 UsdGeom.Scope.Define(stage, "/starling_2/joints")
 
 # Base: visual/collision references live under base_link.
-add_rigid_body(stage, "/starling_2/base_link", 1.2, (0.013, 0.014, 0.013), articulation_root=True)
+add_rigid_body(stage, "/starling_2/base_link", 0.240, (9.0e-4, 6.0e-4, 1.2e-3), articulation_root=True)
 UsdGeom.Xform.Define(stage, "/starling_2/base_link/visuals")
 UsdGeom.Xform.Define(stage, "/starling_2/base_link/collisions")
 reference_usdz(stage, "/starling_2/base_link/visuals/base_link_asset", "./meshes/base_link.usdz")
@@ -109,7 +109,7 @@ apply_collision_to_meshes(stage, "/starling_2/base_link/collisions/base_link_ass
 # by -center so geometry remains in the same assembled position.
 for name in ["back_left_prop", "back_right_prop", "front_left_prop", "front_right_prop"]:
     c = CENTERS[name]
-    add_rigid_body(stage, f"/starling_2/{name}", 0.01, (1e-6, 1e-6, 1e-6), translate=c)
+    add_rigid_body(stage, f"/starling_2/{name}", 0.015, (6.0e-6, 3.5e-6, 8.5e-6), translate=c)
     UsdGeom.Xform.Define(stage, f"/starling_2/{name}/visuals")
     UsdGeom.Xform.Define(stage, f"/starling_2/{name}/collisions")
 
@@ -119,7 +119,10 @@ for name in ["back_left_prop", "back_right_prop", "front_left_prop", "front_righ
     apply_collision_to_meshes(stage, f"/starling_2/{name}/collisions/{name}_asset")
     add_fixed_joint(stage, name, c)
 
+# Save referenced file internally, then export flattened version for deployment
 stage.GetRootLayer().Save()
-print("Wrote", USD_PATH)
+flat_layer = stage.Flatten()
+flat_layer.Export(str(USD_PATH))
+print("Wrote flattened standalone asset to", USD_PATH)
 
 simulation_app.close()
