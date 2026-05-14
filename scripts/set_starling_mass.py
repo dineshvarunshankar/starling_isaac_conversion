@@ -11,8 +11,8 @@ stage = Usd.Stage.Open(path)
 
 VALUES = {
     "base_link": {
-        "mass": 0.240,
-        "inertia": (9.0e-4, 6.0e-4, 1.2e-3),
+        "mass": 0.250,
+        "inertia": (8.0e-4, 5.3e-4, 1.1e-3),
         "com": (0.0, 0.0, 0.0),
     },
     "front_left_prop": {

@@ -132,7 +132,6 @@ for name in ["back_left_prop", "back_right_prop", "front_left_prop", "front_righ
     color = (0.0, 0.4, 1.0) if "front" in name else (1.0, 0.2, 0.2)
     set_color(stage, f"/starling_2/{name}/visuals", color)
 
-    offset = Gf.Vec3f(-c[0], -c[1], -c[2])
     reference_usdz(stage, f"/starling_2/{name}/visuals/{name}_asset", f"./meshes/{MESH_FILES[name]}", center=c)
     reference_usdz(stage, f"/starling_2/{name}/collisions/{name}_asset", f"./meshes/{MESH_FILES[name]}", center=c)
     apply_collision_to_meshes(stage, f"/starling_2/{name}/collisions/{name}_asset")

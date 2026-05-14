@@ -54,7 +54,8 @@ The files in this repository have the following roles:
 | :--- | :--- |
 | **`README.md`** | Instructions for CAD preparation, coordinate conversion, and Isaac Lab setup. |
 | **`hardware_measurements.txt`** | Permanent technical record of raw physical measurements, center distances, mass budgets, and inertia derivations. |
-| **`scripts/make_starling_usd_from_usdz.py`** | Builds and flattens `starling_2.usd` into a self-contained single file asset with embedded physics and joints. |
+| **`scripts/make_starling_usd_from_usdz.py`** | Builds and flattens `starling_2.usd` for Isaac Lab (fixed joints, body-level thrust). |
+| **`scripts/make_starling_usd_pegasus.py`** | Builds `starling_2_pegasus.usd` for Pegasus Simulator (revolute joints, PX4 rotor ordering). |
 | **`scripts/set_starling_mass.py`** | Updates mass, center of mass, and inertia parameters on an existing USD stage. |
 | **`scripts/view_starling_usd.py`** | Loads `starling_2.usd` in Isaac Sim for visual inspection. |
 
@@ -444,9 +445,9 @@ simulation_app.close()
 Expected approximate result:
 
 ```text
-base_link size: about 0.15 x 0.19 x 0.09 m
-prop centers: around +/-0.054 m and +/-0.067 m
-prop z: about 0.011 m
+base_link size: about 0.14 x 0.18 x 0.08 m
+prop centers: around +/-0.066 m and +/-0.088 m
+prop z: about 0.05075 m
 ```
 
 ## 12. Verify Fixed Joints
@@ -579,13 +580,14 @@ The final signs must match the Isaac Lab body-frame convention and the rotor ord
 The matrix used:
 
 ```python
+# Column order: back_left, back_right, front_left, front_right
 allocation_matrix=[
-    [0.0, 0.0, 0.0, 0.0],
-    [0.0, 0.0, 0.0, 0.0],
-    [1.0, 1.0, 1.0, 1.0],
-    [0.067008565, -0.067009726, 0.067009726, -0.065594356],
-    [0.054392057, 0.054395216, -0.054395216, -0.053360999],
-    [-0.07, 0.07, -0.07, 0.07],
+    [0.0,    0.0,    0.0,    0.0  ],   # Fx
+    [0.0,    0.0,    0.0,    0.0  ],   # Fy
+    [1.0,    1.0,    1.0,    1.0  ],   # Fz
+    [0.088, -0.088,  0.088, -0.088],   # Mx (roll)  = y * T
+    [0.066,  0.066, -0.066, -0.066],   # My (pitch) = -x * T
+    [-0.07,  0.07,  -0.07,   0.07 ],   # Mz (yaw)   = reaction torque
 ]
 ```
 
@@ -719,18 +721,18 @@ If the robot appears with random colors, Fusion materials are still active. For 
 
 As noted in Section 2, the main scripts for this workflow are:
 
-* **`make_starling_usd_from_usdz.py`**: Generates the USD file, applies coordinate transforms, sets initial mass values, and defines fixed joints.
+* **`make_starling_usd_from_usdz.py`**: Generates the USD file for Isaac Lab, applies coordinate transforms, sets mass values, and defines fixed joints.
+* **`make_starling_usd_pegasus.py`**: Generates the USD file for Pegasus Simulator, configures PX4 rotor ordering, authors revolute joints nested inside rotor prims, and applies visual color coding.
 * **`set_starling_mass.py`**: Optional script to update physical properties on an existing stage.
 * **`view_starling_usd.py`**: Script to open and inspect the generated USD file in Isaac Sim.
 
-Final required output files for Isaac Lab integration:
+Final required output file for Isaac Lab integration:
 
 ```text
 assets/starling_2/starling_2.usd
-assets/starling_2/meshes/*.usdz
-scripts/make_starling_usd_from_usdz.py
-scripts/set_starling_mass.py
 ```
+
+The `.usdz` mesh files and build scripts are only needed at build time. The flattened `starling_2.usd` is fully self-contained for deployment.
 
 ## 19. Final Checklist
 
@@ -744,7 +746,7 @@ Before using the asset for training or simulation, verify:
 - `base_link` has articulation root APIs.
 - Each prop link has rigid body and mass APIs.
 - Four fixed joints exist.
-- Total mass is about `0.300 kg`.
+- Total mass is about `0.310 kg`.
 - `STARLING_2_CFG` imports.
 - Starling task ID registers.
 
@@ -765,3 +767,27 @@ Exporting uncombined `.usdz` component groups preserves the individual raw bodie
 Standard CAD-to-URDF plugins require a flat assembly tree where each physical link is a single solid component with predefined joint origins. 
 
 Because the Starling assembly uses nested sub-components for motors and hardware, converting it to URDF requires destructive CAD flattening that triggers the coordinate shifting issues noted in Section 20. Natively exporting USDZ meshes and defining the rigid body hierarchy directly in OpenUSD avoids CAD restructuring.
+
+## 22. Pegasus Simulator Integration Workflow
+
+If you plan to deploy the Starling 2 inside the **Pegasus Simulator** using a Software-In-The-Loop (SITL) setup with PX4 autopilot, use the dedicated generation script:
+
+```bash
+~/IsaacLab/isaaclab.sh -p scripts/make_starling_usd_pegasus.py
+```
+
+This compiles a variant asset saved at:
+
+```text
+assets/starling_2/starling_2_pegasus.usd
+```
+
+### Key Architectural Differences for Pegasus:
+1. **Chassis Naming (`/body`):** Pegasus requires the main vehicle frame prim to be explicitly named `/body` instead of `base_link`.
+2. **Rotor Naming (`/rotor<id>`):** Propeller links must be authored as `/rotor0`, `/rotor1`, `/rotor2`, and `/rotor3` following the standard PX4 Quadrotor X configuration:
+   * `rotor0`: Front-Right (CW)
+   * `rotor1`: Rear-Left (CW)
+   * `rotor2`: Front-Left (CCW)
+   * `rotor3`: Rear-Right (CCW)
+3. **Nested Revolute Joints:** Instead of fixed joints at the body level, Pegasus animates spinning propellers using revolute joints around the local Z-axis. To perfectly comply with Pegasus scene conventions, each joint (`joint0` through `joint3`) is **nested directly inside** its corresponding `/rotor<id>` prim path (e.g., `/starling_2/rotor0/joint0`).
+4. **Color Coding:** Debug materials are assigned via the `PrimvarsAPI` to visualize orientation immediately upon loading (Base: Dark Gray, Front Rotors: Blue, Rear Rotors: Red).
