@@ -97,7 +97,8 @@ def add_fixed_joint(stage, child_name, pos):
 def set_color(stage, path, rgb):
     prim = stage.GetPrimAtPath(path)
     if prim:
-        UsdGeom.Imageable(prim).CreateDisplayColorAttr().Set([Gf.Vec3f(*rgb)])
+        # Define the displayColor primvar using the PrimvarsAPI
+        UsdGeom.PrimvarsAPI(prim).CreatePrimvar("displayColor", Sdf.ValueTypeNames.Color3fArray).Set([Gf.Vec3f(*rgb)])
 
 ASSET_DIR.mkdir(parents=True, exist_ok=True)
 
