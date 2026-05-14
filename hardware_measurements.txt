@@ -1,0 +1,51 @@
+ModalAI Starling 2 - Real-World Hardware Measurements
+===================================================
+
+1. Measured Physical Dimensions
+-------------------------------
+- Front-left to front-right rotor span (center-to-center): 176 mm
+- Rear-left to rear-right rotor span (center-to-center): 176 mm
+- Front to rear rotor span (center-to-center): 132 mm
+- Center of drone origin to each individual rotor center (diagonal): 110 mm
+  * Verification: sqrt(66^2 + 88^2) = sqrt(4356 + 7744) = sqrt(12100) = 110 mm perfectly.
+- Elevation heights:
+  * Bottom plane to rotor wing top: 50.75 mm
+  * Bottom plane to drone top: 76.85 mm
+
+2. Derived Simulation Coordinates (Meters)
+------------------------------------------
+Assuming the base origin is centered laterally/longitudinally at the resting bottom plane (Z=0):
+- X offset (Forward/Back) = 132 mm / 2 = 66 mm -> 0.066 m
+- Y offset (Left/Right)   = 176 mm / 2 = 88 mm -> 0.088 m
+- Z offset (Rotor Height) = 50.75 mm           -> 0.05075 m
+
+Resulting Rotor Origins:
+- front_left_prop:  X =  0.066, Y =  0.088, Z = 0.05075
+- front_right_prop: X =  0.066, Y = -0.088, Z = 0.05075
+- back_left_prop:   X = -0.066, Y =  0.088, Z = 0.05075
+- back_right_prop:  X = -0.066, Y = -0.088, Z = 0.05075
+
+3. Measured Mass Budgets
+------------------------
+- Total Takeoff Weight - Daytime payload (with battery): 310 g (0.310 kg)
+- Total Takeoff Weight - Nighttime payload (with battery): 410 g (0.410 kg)
+- Standard dynamic multirotor budget per outboard motor/prop group: 15 g (0.015 kg)
+
+4. Derived Inertia Budget
+-------------------------
+- Derived base chassis mass (base_link):
+  * Daytime: Base Mass = 0.310 kg - (4 * 0.015 kg) = 0.250 kg
+  * Nighttime: Base Mass = 0.410 kg - (4 * 0.015 kg) = 0.350 kg
+
+5. Baseline Box Inertia Tensors (base_link)
+-------------------------------------------
+Approximated solid uniform box boundary extents for chassis:
+- Length (x) = 0.140 m
+- Width (y)  = 0.180 m
+- Height (z) = 0.07685 m
+- Base Mass (m) = 0.250 kg (chosen to be 250g. Needs adjustment for nighttime payload)
+
+Inertia Formulas:
+- Ixx = (1/12) * m * (y^2 + z^2) = (0.250/12) * (0.180^2 + 0.07685^2) = 8.0e-4 kg*m^2
+- Iyy = (1/12) * m * (x^2 + z^2) = (0.250/12) * (0.140^2 + 0.07685^2) = 5.3e-4 kg*m^2
+- Izz = (1/12) * m * (x^2 + y^2) = (0.250/12) * (0.140^2 + 0.180^2)   = 1.1e-3 kg*m^2

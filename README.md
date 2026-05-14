@@ -53,6 +53,7 @@ The files in this repository have the following roles:
 | File | Role |
 | :--- | :--- |
 | **`README.md`** | Instructions for CAD preparation, coordinate conversion, and Isaac Lab setup. |
+| **`hardware_measurements.txt`** | Permanent technical record of raw physical measurements, center distances, mass budgets, and inertia derivations. |
 | **`scripts/make_starling_usd_from_usdz.py`** | Builds and flattens `starling_2.usd` into a self-contained single file asset with embedded physics and joints. |
 | **`scripts/set_starling_mass.py`** | Updates mass, center of mass, and inertia parameters on an existing USD stage. |
 | **`scripts/view_starling_usd.py`** | Loads `starling_2.usd` in Isaac Sim for visual inspection. |
@@ -188,18 +189,18 @@ target units = meters
 To map the CAD geometry into the simulation frame, the script applies the following conversion:
 
 ```text
-target_x =  source_z * 0.001
-target_y = -source_x * 0.001
-target_z =  source_y * 0.001
+target_x = source_z * 0.001
+target_y = source_x * 0.001
+target_z = source_y * 0.001
 ```
 
-*(Note: `target_y` uses a negative sign because the source CAD files define the left side using negative values, whereas the simulation target frame requires positive values for the left axis).*
+*(Note: `target_y` maps directly to `source_x` using positive coefficients to ensure source CAD left/right orientation is accurately maintained without mirroring geometry).*
 
 In the generator script, this mapping is authored as a 4x4 matrix transform on the referenced geometry:
 
 ```python
 m = Gf.Matrix4d(
-    0.0, -0.001, 0.0, 0.0,
+    0.0,  0.001, 0.0, 0.0,
     0.0,  0.0,   0.001, 0.0,
     0.001, 0.0,  0.0, 0.0,
     0.0,  0.0,   0.0, 1.0,
@@ -211,16 +212,16 @@ m = Gf.Matrix4d(
 > [!NOTE]
 > **Pre-coded in scripts:** The final rotor centers are already measured and hardcoded into the `CENTERS` dictionary in the generation script. They determine joint placements and the control allocation matrix.
 
-To determine where the propeller links connect to the base frame, spatial extents were measured directly from the raw CAD source geometry. 
+To determine where the propeller links connect to the base frame, real-world physical spacing dimensions were measured directly from the Starling 2 hardware.
 
-Applying the conversion formula to the measured CAD origins yields the final simulation centers in meters:
+Applying these true measured offsets yields the final simulation centers in meters:
 
 ```python
 CENTERS = {
-    "front_left_prop":  ( 0.054395216,  0.067009726, 0.011335516),
-    "front_right_prop": ( 0.053360999, -0.065594356, 0.011335516),
-    "back_left_prop":   (-0.054392057,  0.067008565, 0.011335516),
-    "back_right_prop":  (-0.054395216, -0.067009726, 0.011335516),
+    "front_left_prop":  ( 0.066,  0.088, 0.05075),
+    "front_right_prop": ( 0.066, -0.088, 0.05075),
+    "back_left_prop":   (-0.066,  0.088, 0.05075),
+    "back_right_prop":  (-0.066, -0.088, 0.05075),
 }
 ```
 
@@ -338,25 +339,24 @@ The prop links are fixed to `base_link` because the Starling is simulated as a m
 The ModalAI Starling 2 datasheet lists:
 
 ```text
-takeoff weight: 285 g
-diagonal size: 230 mm
-motors: 1504 3000kv
-propellers: 120 mm
-frame: 3 mm carbon fiber
+takeoff weight: 310 g (measured)
+rotor span (x): 132 mm
+rotor span (y): 176 mm
+height: 76.85 mm
 ```
 
-Reference: [ModalAI Starling 2 datasheet](https://docs.modalai.com/starling-2-datasheet/)
+Reference: Physical hardware measurements of Starling 2.
 
-Use a rounded total mass:
+Use the measured total mass:
 
 ```text
-total mass = 0.300 kg
+total mass = 0.310 kg
 ```
 
 Split the mass into one main body and four prop/motor groups:
 
 ```text
-base_link:        0.240 kg
+base_link:        0.250 kg
 front_left_prop:  0.015 kg
 front_right_prop: 0.015 kg
 back_left_prop:   0.015 kg
@@ -366,7 +366,7 @@ back_right_prop:  0.015 kg
 Check:
 
 ```text
-0.240 + 4 * 0.015 = 0.300 kg
+0.250 + 4 * 0.015 = 0.310 kg
 ```
 
 ### Inertia Calculation
@@ -381,29 +381,29 @@ Iyy = (1/12) * m * (x^2 + z^2)
 Izz = (1/12) * m * (x^2 + y^2)
 ```
 
-Approximate base dimensions *(measured directly from the outer bounding box extents of the `base_link` CAD geometry)*:
+Approximate base dimensions *(measured directly from the outer bounding box extents of the `base_link` physical geometry)*:
 
 ```text
-x = 0.151 m
-y = 0.194 m
-z = 0.086 m
-m = 0.240 kg
+x = 0.140 m
+y = 0.180 m
+z = 0.07685 m
+m = 0.250 kg
 ```
 
 Example `Ixx` calculation:
 
 ```text
-Ixx = (1/12) * 0.240 * (0.194^2 + 0.086^2)
-Ixx = 0.020 * (0.037636 + 0.007396)
-Ixx = 0.020 * 0.045032
-Ixx = 0.00090064 kg*m^2
-Ixx ≈ 9.0e-4 kg*m^2
+Ixx = (1/12) * 0.250 * (0.180^2 + 0.07685^2)
+Ixx = 0.02083 * (0.0324 + 0.0059)
+Ixx = 0.02083 * 0.0383
+Ixx = 0.000798 kg*m^2
+Ixx ≈ 8.0e-4 kg*m^2
 ```
 
 Used inertia values:
 
 ```text
-base_link:      (9.0e-4, 6.0e-4, 1.2e-3) kg*m^2
+base_link:      (8.0e-4, 5.3e-4, 1.1e-3) kg*m^2
 each prop link: (6.0e-6, 3.5e-6, 8.5e-6) kg*m^2
 ```
 

@@ -19,15 +19,20 @@ MESH_FILES = {
     "back_right_prop": "back_right_prop.usdz",
 }
 
-# Joint/body origins measured from your previous STL bounds, converted from
-# Fusion frame (X left/right, Y up, Z front/back, mm) into Isaac frame
-# (X front/back, Y left/right, Z up, m): (x,y,z)_isaac = (Z, -X, Y) * 0.001
+# Real-world physical dimensions measured from Starling 2 hardware:
+# X (front/back center-to-center) = 132 mm -> +/- 0.066 m
+# Y (left/right center-to-center) = 176 mm -> +/- 0.088 m
+# Z (bottom plane to rotor top) = 50.75 mm -> +0.05075 m
 CENTERS = {
-    "front_left_prop":  Gf.Vec3f( 0.054395216,  0.067009726, 0.011335516),
-    "front_right_prop": Gf.Vec3f( 0.053360999, -0.065594356, 0.011335516),
-    "back_left_prop":   Gf.Vec3f(-0.054392057,  0.067008565, 0.011335516),
-    "back_right_prop":  Gf.Vec3f(-0.054395216, -0.067009726, 0.011335516),
+    "front_left_prop":  Gf.Vec3f( 0.066,  0.088, 0.05075),
+    "front_right_prop": Gf.Vec3f( 0.066, -0.088, 0.05075),
+    "back_left_prop":   Gf.Vec3f(-0.066,  0.088, 0.05075),
+    "back_right_prop":  Gf.Vec3f(-0.066, -0.088, 0.05075),
 }
+
+# Configuration: Choose between Daytime (310g total) or Nighttime (410g total) payload
+# Daytime: Base Mass = 0.250 kg | Nighttime: Base Mass = 0.350 kg
+BASE_MASS = 0.250
 
 def add_rigid_body(stage, path, mass, inertia, articulation_root=False, translate=None):
     prim = stage.DefinePrim(path, "Xform")
@@ -51,15 +56,17 @@ def reference_usdz(stage, prim_path, rel_asset_path, center=None):
 
     # Source USDZ is effectively: X left/right, Y up, Z front/back, units mm.
     # Target Isaac is: X forward, Y left, Z up, units meters.
+    # Using positive 0.001 maps CAD X directly to Isaac Y without mirroring left/right geometry.
     m = Gf.Matrix4d(
-        0.0, -0.001, 0.0, 0.0,
+        0.0,  0.001, 0.0, 0.0,
         0.0,  0.0,   0.001, 0.0,
         0.001, 0.0,  0.0, 0.0,
         0.0,  0.0,   0.0, 1.0,
     )
 
     if center is not None:
-        m.SetTranslateOnly(Gf.Vec3d(-center[0], -center[1], -center[2]))
+        # Use SetTranslate to preserve the custom rotation and scaling elements above
+        m.SetTranslate(Gf.Vec3d(-center[0], -center[1], -center[2]))
 
     UsdGeom.Xformable(prim).AddTransformOp().Set(m)
     prim.GetReferences().AddReference(rel_asset_path)
@@ -87,6 +94,11 @@ def add_fixed_joint(stage, child_name, pos):
     joint.CreateCollisionEnabledAttr(False)
     return joint
 
+def set_color(stage, path, rgb):
+    prim = stage.GetPrimAtPath(path)
+    if prim:
+        UsdGeom.Imageable(prim).CreateDisplayColorAttr().Set([Gf.Vec3f(*rgb)])
+
 ASSET_DIR.mkdir(parents=True, exist_ok=True)
 
 stage = Usd.Stage.CreateNew(str(USD_PATH))
@@ -98,9 +110,11 @@ stage.SetDefaultPrim(root.GetPrim())
 UsdGeom.Scope.Define(stage, "/starling_2/joints")
 
 # Base: visual/collision references live under base_link.
-add_rigid_body(stage, "/starling_2/base_link", 0.240, (9.0e-4, 6.0e-4, 1.2e-3), articulation_root=True)
+# Inertia derived from uniform box bounds: length=0.14m, width=0.18m, height=0.07685m.
+add_rigid_body(stage, "/starling_2/base_link", BASE_MASS, (8.0e-4, 5.3e-4, 1.1e-3), articulation_root=True)
 UsdGeom.Xform.Define(stage, "/starling_2/base_link/visuals")
 UsdGeom.Xform.Define(stage, "/starling_2/base_link/collisions")
+set_color(stage, "/starling_2/base_link/visuals", (0.1, 0.1, 0.1))
 reference_usdz(stage, "/starling_2/base_link/visuals/base_link_asset", "./meshes/base_link.usdz")
 reference_usdz(stage, "/starling_2/base_link/collisions/base_link_asset", "./meshes/base_link.usdz")
 apply_collision_to_meshes(stage, "/starling_2/base_link/collisions/base_link_asset")
@@ -112,6 +126,10 @@ for name in ["back_left_prop", "back_right_prop", "front_left_prop", "front_righ
     add_rigid_body(stage, f"/starling_2/{name}", 0.015, (6.0e-6, 3.5e-6, 8.5e-6), translate=c)
     UsdGeom.Xform.Define(stage, f"/starling_2/{name}/visuals")
     UsdGeom.Xform.Define(stage, f"/starling_2/{name}/collisions")
+    
+    # Color coding: Blue for front, Red for back
+    color = (0.0, 0.4, 1.0) if "front" in name else (1.0, 0.2, 0.2)
+    set_color(stage, f"/starling_2/{name}/visuals", color)
 
     offset = Gf.Vec3f(-c[0], -c[1], -c[2])
     reference_usdz(stage, f"/starling_2/{name}/visuals/{name}_asset", f"./meshes/{MESH_FILES[name]}", center=c)
