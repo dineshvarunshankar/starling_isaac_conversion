@@ -65,8 +65,8 @@ def reference_usdz(stage, prim_path, rel_asset_path, center=None):
     )
 
     if center is not None:
-        # Use SetTranslate to preserve the custom rotation and scaling elements above
-        m.SetTranslate(Gf.Vec3d(-center[0], -center[1], -center[2]))
+        # SetTranslateOnly injects the offset WITHOUT overwriting the rotation/scale rows above
+        m.SetTranslateOnly(Gf.Vec3d(-center[0], -center[1], -center[2]))
 
     UsdGeom.Xformable(prim).AddTransformOp().Set(m)
     prim.GetReferences().AddReference(rel_asset_path)
